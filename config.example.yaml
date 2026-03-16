@@ -45,6 +45,7 @@ email:
   tls: true
 
   # SMTP username (optional — leave blank or omit for no authentication)
+  # WARNING: Never commit real credentials to git. Use environment variables or secrets management.
   smtp_username: ""
 
   # SMTP password (optional — leave blank or omit for no authentication)
