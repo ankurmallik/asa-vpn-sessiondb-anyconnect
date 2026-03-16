@@ -513,8 +513,8 @@ class TestValidation:
             cfg = load_config(cfg_file)
             assert cfg.email.smtp_port == port
 
-    def test_smtp_port_not_checked_when_email_disabled(self, tmp_path):
-        """An invalid smtp_port is ignored when email is disabled."""
+    def test_smtp_port_always_validated_when_disabled(self, tmp_path):
+        """An invalid smtp_port raises even when email is disabled."""
         content = """\
             devices:
               - 192.168.1.1
@@ -523,6 +523,81 @@ class TestValidation:
               smtp_port: 0
         """
         cfg_file = _write_config(tmp_path, content)
-        # Should NOT raise
+        with pytest.raises(ValueError) as exc_info:
+            load_config(cfg_file)
+        assert "smtp_port" in str(exc_info.value)
+
+    def test_smtp_port_valid_when_email_disabled_passes(self, tmp_path):
+        """A valid smtp_port does not raise even when email is disabled."""
+        content = """\
+            devices:
+              - 192.168.1.1
+            email:
+              enabled: false
+              smtp_port: 587
+        """
+        cfg_file = _write_config(tmp_path, content)
         cfg = load_config(cfg_file)
         assert cfg.email.enabled is False
+        assert cfg.email.smtp_port == 587
+
+    # --- Truthy non-dict section values (CRITICAL 1) ----------------------
+
+    def test_collection_scalar_raises_not_attribute_error(self, tmp_path):
+        """A truthy scalar for 'collection' (e.g. 42) raises ValueError, not AttributeError."""
+        content = """\
+            devices:
+              - 192.168.1.1
+            collection: 42
+        """
+        cfg_file = _write_config(tmp_path, content)
+        with pytest.raises(ValueError) as exc_info:
+            load_config(cfg_file)
+        assert "collection" in str(exc_info.value)
+
+    # --- Bool values silently pass int checks (CRITICAL 2) ----------------
+
+    def test_max_workers_bool_raises(self, tmp_path):
+        """max_workers: true (a bool) must be rejected as a type error."""
+        content = """\
+            devices:
+              - 192.168.1.1
+            collection:
+              max_workers: true
+        """
+        cfg_file = _write_config(tmp_path, content)
+        with pytest.raises(ValueError) as exc_info:
+            load_config(cfg_file)
+        assert "max_workers" in str(exc_info.value)
+
+    def test_smtp_port_string_enabled_raises(self, tmp_path):
+        """smtp_port: \"587\" (string) with email enabled raises a type error."""
+        content = """\
+            devices:
+              - 192.168.1.1
+            email:
+              enabled: true
+              smtp_server: "mail.corp.com"
+              from_address: "vpn@corp.com"
+              smtp_port: "587"
+              recipients:
+                - ops@corp.com
+        """
+        cfg_file = _write_config(tmp_path, content)
+        with pytest.raises(ValueError) as exc_info:
+            load_config(cfg_file)
+        assert "smtp_port" in str(exc_info.value)
+
+    def test_smtp_port_string_disabled_raises(self, tmp_path):
+        """smtp_port: \"587\" (string) with email disabled still raises a type error."""
+        content = """\
+            devices:
+              - 192.168.1.1
+            email:
+              enabled: false
+              smtp_port: "587"
+        """
+        cfg_file = _write_config(tmp_path, content)
+        with pytest.raises(ValueError) as exc_info:
+            load_config(cfg_file)
+        assert "smtp_port" in str(exc_info.value)
