@@ -1,7 +1,5 @@
 """Unit tests for vpn_collector.config (Tasks 2.1–2.4)."""
 
-from __future__ import annotations
-
 import textwrap
 from pathlib import Path
 
@@ -368,3 +366,163 @@ class TestValidation:
         assert "smtp_server" in message
         assert "from_address" in message
         assert "recipients" in message
+
+    # --- Type guard tests (CRITICAL 1) ------------------------------------
+
+    def test_max_workers_wrong_type_raises(self, tmp_path):
+        """max_workers with a non-integer value raises a clean type error."""
+        content = """\
+            devices:
+              - 192.168.1.1
+            collection:
+              max_workers: "banana"
+        """
+        cfg_file = _write_config(tmp_path, content)
+        with pytest.raises(ValueError) as exc_info:
+            load_config(cfg_file)
+        message = str(exc_info.value)
+        assert "max_workers" in message
+        assert "int" in message.lower() or "str" in message.lower()
+
+    def test_retries_wrong_type_raises(self, tmp_path):
+        """retries with a non-integer value raises a clean type error."""
+        content = """\
+            devices:
+              - 192.168.1.1
+            collection:
+              retries: "three"
+        """
+        cfg_file = _write_config(tmp_path, content)
+        with pytest.raises(ValueError) as exc_info:
+            load_config(cfg_file)
+        message = str(exc_info.value)
+        assert "retries" in message
+        assert "int" in message.lower() or "str" in message.lower()
+
+    def test_retry_backoff_base_wrong_type_raises(self, tmp_path):
+        """retry_backoff_base with a non-numeric value raises a clean type error."""
+        content = """\
+            devices:
+              - 192.168.1.1
+            collection:
+              retry_backoff_base: "fast"
+        """
+        cfg_file = _write_config(tmp_path, content)
+        with pytest.raises(ValueError) as exc_info:
+            load_config(cfg_file)
+        message = str(exc_info.value)
+        assert "retry_backoff_base" in message
+        assert "int" in message.lower() or "float" in message.lower() or "str" in message.lower()
+
+    def test_timeout_wrong_type_raises(self, tmp_path):
+        """timeout with a non-numeric value raises a clean type error."""
+        content = """\
+            devices:
+              - 192.168.1.1
+            collection:
+              timeout: "quick"
+        """
+        cfg_file = _write_config(tmp_path, content)
+        with pytest.raises(ValueError) as exc_info:
+            load_config(cfg_file)
+        message = str(exc_info.value)
+        assert "timeout" in message
+        assert "int" in message.lower() or "float" in message.lower() or "str" in message.lower()
+
+    # --- Non-list devices/recipients (CRITICAL 2) -------------------------
+
+    def test_devices_as_scalar_string_raises(self, tmp_path):
+        """A scalar string for 'devices' raises a helpful type error."""
+        content = "devices: 192.168.1.1\n"
+        cfg_file = _write_config(tmp_path, content)
+        with pytest.raises(ValueError) as exc_info:
+            load_config(cfg_file)
+        message = str(exc_info.value)
+        assert "devices" in message.lower()
+
+    def test_recipients_as_scalar_string_raises(self, tmp_path):
+        """A scalar string for 'recipients' raises a helpful type error, not a char list."""
+        content = """\
+            devices:
+              - 192.168.1.1
+            email:
+              enabled: true
+              smtp_server: "mail.corp.com"
+              from_address: "vpn@corp.com"
+              recipients: ops@corp.com
+        """
+        cfg_file = _write_config(tmp_path, content)
+        with pytest.raises(ValueError) as exc_info:
+            load_config(cfg_file)
+        message = str(exc_info.value)
+        assert "recipients" in message.lower()
+
+    # --- smtp_port range validation (IMPORTANT 4) -------------------------
+
+    def test_smtp_port_zero_raises(self, tmp_path):
+        """smtp_port of 0 is out of valid range and must raise."""
+        content = """\
+            devices:
+              - 192.168.1.1
+            email:
+              enabled: true
+              smtp_server: "mail.corp.com"
+              from_address: "vpn@corp.com"
+              smtp_port: 0
+              recipients:
+                - ops@corp.com
+        """
+        cfg_file = _write_config(tmp_path, content)
+        with pytest.raises(ValueError) as exc_info:
+            load_config(cfg_file)
+        assert "smtp_port" in str(exc_info.value)
+
+    def test_smtp_port_too_large_raises(self, tmp_path):
+        """smtp_port above 65535 is out of valid range and must raise."""
+        content = """\
+            devices:
+              - 192.168.1.1
+            email:
+              enabled: true
+              smtp_server: "mail.corp.com"
+              from_address: "vpn@corp.com"
+              smtp_port: 99999
+              recipients:
+                - ops@corp.com
+        """
+        cfg_file = _write_config(tmp_path, content)
+        with pytest.raises(ValueError) as exc_info:
+            load_config(cfg_file)
+        assert "smtp_port" in str(exc_info.value)
+
+    def test_smtp_port_valid_boundary_values(self, tmp_path):
+        """smtp_port values of 1 and 65535 are valid."""
+        for port in (1, 65535):
+            content = f"""\
+                devices:
+                  - 192.168.1.1
+                email:
+                  enabled: true
+                  smtp_server: "mail.corp.com"
+                  from_address: "vpn@corp.com"
+                  smtp_port: {port}
+                  recipients:
+                    - ops@corp.com
+            """
+            cfg_file = _write_config(tmp_path, content)
+            cfg = load_config(cfg_file)
+            assert cfg.email.smtp_port == port
+
+    def test_smtp_port_not_checked_when_email_disabled(self, tmp_path):
+        """An invalid smtp_port is ignored when email is disabled."""
+        content = """\
+            devices:
+              - 192.168.1.1
+            email:
+              enabled: false
+              smtp_port: 0
+        """
+        cfg_file = _write_config(tmp_path, content)
+        # Should NOT raise
+        cfg = load_config(cfg_file)
+        assert cfg.email.enabled is False

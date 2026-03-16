@@ -1,11 +1,8 @@
 """Configuration loading and validation for the ASA VPN session collector."""
 
-from __future__ import annotations
-
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List
 
 try:
     import yaml
@@ -48,14 +45,14 @@ class EmailConfig:
     smtp_username: str = ""
     smtp_password: str = ""
     from_address: str = "noreply@example.com"
-    recipients: List[str] = field(default_factory=list)
+    recipients: list[str] = field(default_factory=list)
 
 
 @dataclass
 class AppConfig:
     """Top-level application configuration."""
 
-    devices: List[str] = field(default_factory=list)
+    devices: list[str] = field(default_factory=list)
     collection: CollectionConfig = field(default_factory=CollectionConfig)
     output: OutputConfig = field(default_factory=OutputConfig)
     email: EmailConfig = field(default_factory=EmailConfig)
@@ -101,8 +98,12 @@ def load_config(path: str | os.PathLike | None = None) -> AppConfig:
     with config_path.open("r", encoding="utf-8") as fh:
         raw = yaml.safe_load(fh) or {}
 
-    cfg = _build_config(raw)
-    _validate_config(cfg)
+    errors: list[str] = []
+    cfg = _build_config(raw, errors)
+    _validate_config(cfg, errors)
+    if errors:
+        bullet_list = "\n  - ".join(errors)
+        raise ValueError(f"Configuration errors found:\n  - {bullet_list}")
     return cfg
 
 
@@ -110,74 +111,107 @@ def load_config(path: str | os.PathLike | None = None) -> AppConfig:
 # Internal helpers
 # ---------------------------------------------------------------------------
 
-def _build_config(raw: dict) -> AppConfig:
+def _build_config(raw: dict, errors: list[str]) -> AppConfig:
     """Construct an :class:`AppConfig` from a raw YAML dictionary."""
     collection_raw = raw.get("collection") or {}
     output_raw = raw.get("output") or {}
     email_raw = raw.get("email") or {}
 
     collection = CollectionConfig(
-        max_workers=collection_raw.get("max_workers", CollectionConfig.max_workers),
-        retries=collection_raw.get("retries", CollectionConfig.retries),
-        retry_backoff_base=collection_raw.get(
-            "retry_backoff_base", CollectionConfig.retry_backoff_base
-        ),
-        timeout=collection_raw.get("timeout", CollectionConfig.timeout),
+        max_workers=collection_raw.get("max_workers", 20),
+        retries=collection_raw.get("retries", 3),
+        retry_backoff_base=collection_raw.get("retry_backoff_base", 2.0),
+        timeout=collection_raw.get("timeout", 30),
     )
 
     output = OutputConfig(
-        directory=output_raw.get("directory", OutputConfig.directory),
-        excel_filename=output_raw.get("excel_filename", OutputConfig.excel_filename),
+        directory=output_raw.get("directory", "."),
+        excel_filename=output_raw.get("excel_filename", "AnyConnect-Sessions.xlsx"),
     )
+
+    # recipients: must be a list, not a scalar
+    raw_recipients = email_raw.get("recipients") or []
+    if not isinstance(raw_recipients, list):
+        errors.append(
+            f"'email.recipients' must be a list (got {type(raw_recipients).__name__})."
+        )
+        raw_recipients = []
 
     email = EmailConfig(
-        enabled=email_raw.get("enabled", EmailConfig.enabled),
-        smtp_server=email_raw.get("smtp_server", EmailConfig.smtp_server),
-        smtp_port=email_raw.get("smtp_port", EmailConfig.smtp_port),
-        tls=email_raw.get("tls", EmailConfig.tls),
-        smtp_username=email_raw.get("smtp_username", EmailConfig.smtp_username),
-        smtp_password=email_raw.get("smtp_password", EmailConfig.smtp_password),
-        from_address=email_raw.get("from_address", EmailConfig.from_address),
-        recipients=list(email_raw.get("recipients") or []),
+        enabled=email_raw.get("enabled", False),
+        smtp_server=email_raw.get("smtp_server", "smtp.example.com"),
+        smtp_port=email_raw.get("smtp_port", 587),
+        tls=email_raw.get("tls", True),
+        smtp_username=email_raw.get("smtp_username", ""),
+        smtp_password=email_raw.get("smtp_password", ""),
+        from_address=email_raw.get("from_address", "noreply@example.com"),
+        recipients=list(raw_recipients),
     )
 
+    # devices: must be a list, not a scalar
+    raw_devices = raw.get("devices") or []
+    if not isinstance(raw_devices, list):
+        errors.append(
+            f"'devices' must be a list (got {type(raw_devices).__name__})."
+        )
+        raw_devices = []
+
     return AppConfig(
-        devices=list(raw.get("devices") or []),
+        devices=list(raw_devices),
         collection=collection,
         output=output,
         email=email,
     )
 
 
-def _validate_config(cfg: AppConfig) -> None:
-    """Validate *cfg*, collecting ALL errors before raising.
+def _validate_config(cfg: AppConfig, errors: list[str]) -> None:
+    """Validate *cfg*, appending all problems into *errors*.
 
-    Raises
-    ------
-    ValueError
-        A single exception whose message lists every validation problem found.
+    The caller is responsible for raising if *errors* is non-empty after
+    this function returns.
     """
-    errors: list[str] = []
-
     # devices
     if not cfg.devices:
         errors.append("'devices' must be a non-empty list of hostnames/IPs.")
 
-    # collection
-    if cfg.collection.max_workers < 1:
+    # collection — type guards before numeric comparisons
+    if not isinstance(cfg.collection.max_workers, int):
+        errors.append(
+            f"'collection.max_workers' must be an integer "
+            f"(got {type(cfg.collection.max_workers).__name__})."
+        )
+    elif cfg.collection.max_workers < 1:
         errors.append(
             f"'collection.max_workers' must be >= 1 (got {cfg.collection.max_workers})."
         )
-    if cfg.collection.retries < 0:
+
+    if not isinstance(cfg.collection.retries, int):
+        errors.append(
+            f"'collection.retries' must be an integer "
+            f"(got {type(cfg.collection.retries).__name__})."
+        )
+    elif cfg.collection.retries < 0:
         errors.append(
             f"'collection.retries' must be >= 0 (got {cfg.collection.retries})."
         )
-    if cfg.collection.retry_backoff_base <= 0:
+
+    if not isinstance(cfg.collection.retry_backoff_base, (int, float)):
+        errors.append(
+            f"'collection.retry_backoff_base' must be an int or float "
+            f"(got {type(cfg.collection.retry_backoff_base).__name__})."
+        )
+    elif cfg.collection.retry_backoff_base <= 0:
         errors.append(
             f"'collection.retry_backoff_base' must be > 0 "
             f"(got {cfg.collection.retry_backoff_base})."
         )
-    if cfg.collection.timeout <= 0:
+
+    if not isinstance(cfg.collection.timeout, (int, float)):
+        errors.append(
+            f"'collection.timeout' must be an int or float "
+            f"(got {type(cfg.collection.timeout).__name__})."
+        )
+    elif cfg.collection.timeout <= 0:
         errors.append(
             f"'collection.timeout' must be > 0 (got {cfg.collection.timeout})."
         )
@@ -196,7 +230,13 @@ def _validate_config(cfg: AppConfig) -> None:
             errors.append(
                 "'email.recipients' must be a non-empty list when email is enabled."
             )
-
-    if errors:
-        bullet_list = "\n  - ".join(errors)
-        raise ValueError(f"Configuration errors found:\n  - {bullet_list}")
+        if not isinstance(cfg.email.smtp_port, int):
+            errors.append(
+                f"'email.smtp_port' must be an integer "
+                f"(got {type(cfg.email.smtp_port).__name__})."
+            )
+        elif not (1 <= cfg.email.smtp_port <= 65535):
+            errors.append(
+                f"'email.smtp_port' must be between 1 and 65535 "
+                f"(got {cfg.email.smtp_port})."
+            )
