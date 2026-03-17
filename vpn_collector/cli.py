@@ -169,7 +169,7 @@ def main() -> None:
 
     # Set up logging before anything else
     _setup_logging(early_output_dir, args.verbose)
-    logger = logging.getLogger("vpn_collector")  # noqa: F841 — used below
+    logger = logging.getLogger("vpn_collector")
 
     # Load configuration
     try:
