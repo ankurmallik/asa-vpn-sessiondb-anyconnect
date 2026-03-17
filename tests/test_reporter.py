@@ -597,19 +597,15 @@ class TestWriteJsonSameSecondNoOverwrite:
         """Two write_json calls sharing the same timestamp must not overwrite each other."""
         config = _make_config(tmp_path)
         results = [_success("fw1", [_SESSION_A])]
+        frozen = datetime(2024, 6, 1, 12, 0, 0, tzinfo=timezone.utc)
 
-        # First call
-        write_json(results, config)
-        first_files = list(tmp_path.glob("anyconnect-sessions-*.json"))
-        assert len(first_files) == 1
+        with patch("vpn_collector.reporter.datetime") as mock_dt:
+            mock_dt.now.return_value = frozen
+            write_json(results, config)
+            write_json(results, config)
 
-        # Second call — same second or different, _unique_path handles it
-        write_json(results, config)
         all_json = list(tmp_path.glob("anyconnect-sessions-*.json"))
-        # At minimum the second call must produce a second file if timestamps collide.
-        # Force collision via mock.
-        # (If they differ in time the test below covers the mock path.)
-        assert len(all_json) >= 1  # at least the first file survived
+        assert len(all_json) == 2, f"Expected 2 JSON files, found: {[f.name for f in all_json]}"
 
     def test_two_calls_same_timestamp_both_files_have_content(self, tmp_path: Path) -> None:
         """Both files produced when a timestamp collision occurs must contain data."""
