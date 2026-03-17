@@ -11,7 +11,6 @@ from __future__ import annotations
 import csv
 import json
 import logging
-import os
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -45,9 +44,18 @@ def _all_session_fields(results: list[DeviceResult]) -> list[str]:
     return list(seen.keys())
 
 
-def _run_timestamp() -> str:
-    """Return a timestamp string suitable for sheet/file names: YYYYMMDD_HHMMSS."""
-    return datetime.now().strftime("%Y%m%d_%H%M%S")
+def _unique_path(path: Path) -> Path:
+    """Return path unchanged if it doesn't exist; otherwise append _1, _2, etc."""
+    if not path.exists():
+        return path
+    stem = path.stem
+    suffix = path.suffix
+    counter = 1
+    while True:
+        candidate = path.parent / f"{stem}_{counter}{suffix}"
+        if not candidate.exists():
+            return candidate
+        counter += 1
 
 
 def _ensure_dir(directory: str) -> Path:
@@ -90,7 +98,7 @@ def write_excel(results: list[DeviceResult], config: AppConfig) -> None:
         if "Sheet" in wb.sheetnames:
             del wb["Sheet"]
 
-    ts = _run_timestamp()
+    now = datetime.now(timezone.utc)
 
     # ------------------------------------------------------------------
     # Summary sheet — always replaced with the latest run data
@@ -101,7 +109,7 @@ def write_excel(results: list[DeviceResult], config: AppConfig) -> None:
     # Insert Summary as the first sheet
     ws_summary = wb.create_sheet("Summary", 0)
 
-    run_ts = datetime.now(timezone.utc).isoformat()
+    run_ts = now.isoformat()
     total_devices = len(results)
     successful_devices = sum(1 for r in results if r.success)
     total_sessions = sum(len(r.sessions) for r in results)
@@ -126,8 +134,14 @@ def write_excel(results: list[DeviceResult], config: AppConfig) -> None:
     # ------------------------------------------------------------------
     # Raw sheet — one per run, named Raw_YYYYMMDD_HHMMSS
     # ------------------------------------------------------------------
-    raw_sheet_name = f"Raw_{ts}"
-    ws_raw = wb.create_sheet(raw_sheet_name)
+    raw_name = now.strftime("Raw_%Y%m%d_%H%M%S")
+    existing = set(wb.sheetnames)
+    unique_raw_name = raw_name
+    counter = 1
+    while unique_raw_name in existing:
+        unique_raw_name = f"{raw_name}_{counter}"
+        counter += 1
+    ws_raw = wb.create_sheet(unique_raw_name)
 
     fields = _all_session_fields(results)
     ws_raw.append(fields)
@@ -140,7 +154,7 @@ def write_excel(results: list[DeviceResult], config: AppConfig) -> None:
             ws_raw.append(row)
 
     wb.save(xlsx_path)
-    logger.info("Excel written: %s (raw sheet: %s)", xlsx_path, raw_sheet_name)
+    logger.info("Excel written: %s (raw sheet: %s)", xlsx_path, ws_raw.title)
 
 
 # ---------------------------------------------------------------------------
@@ -163,8 +177,8 @@ def write_csv(results: list[DeviceResult], config: AppConfig) -> None:
         return
 
     out_dir = _ensure_dir(config.output.directory)
-    ts = _run_timestamp()
-    csv_path = out_dir / f"anyconnect-sessions-{ts}.csv"
+    ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    csv_path = _unique_path(out_dir / f"anyconnect-sessions-{ts}.csv")
 
     fields = _all_session_fields(results)
 
@@ -198,8 +212,8 @@ def write_json(results: list[DeviceResult], config: AppConfig) -> None:
         return
 
     out_dir = _ensure_dir(config.output.directory)
-    ts = _run_timestamp()
-    json_path = out_dir / f"anyconnect-sessions-{ts}.json"
+    ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    json_path = _unique_path(out_dir / f"anyconnect-sessions-{ts}.json")
 
     payload: list[dict] = []
     for result in results:
