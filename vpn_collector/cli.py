@@ -5,10 +5,14 @@ import getpass
 import logging
 import sys
 import yaml
+from datetime import datetime, timezone
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
+from vpn_collector.collector import collect_all
 from vpn_collector.config import AppConfig, load_config
+from vpn_collector.mailer import send_report
+from vpn_collector.reporter import write_csv, write_excel, write_json
 
 _LOG_FORMAT = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
 _LOG_FILENAME = "vpn_collector.log"
@@ -196,16 +200,56 @@ def main() -> None:
     username = input("Username: ")
     password = getpass.getpass("Password: ")
 
-    # TODO: collect, report, mail
-    logger.debug(
-        "CLI ready — devices=%s, output_dir=%s, workers=%d, "
-        "excel=%s, csv=%s, json=%s, email=%s",
-        config.devices,
-        config.output.directory,
-        config.collection.max_workers,
-        args.excel,
-        args.csv,
-        args.json,
-        config.email.enabled,
+    # Determine whether to send email (CLI flag overrides config)
+    send_email = config.email.enabled or args.email
+
+    # Collect VPN sessions from all devices
+    results = collect_all(config, username, password)
+
+    # Snapshot existing output files before writing (to detect new ones for email)
+    out_dir = Path(config.output.directory)
+    pre_existing = set(out_dir.glob("anyconnect-sessions-*")) if out_dir.exists() else set()
+
+    # Write requested output formats
+    if args.excel:
+        write_excel(results, config)
+    if args.csv:
+        write_csv(results, config)
+    if args.json:
+        write_json(results, config)
+
+    # Gather output files to attach: timestamped files added this run + excel if written
+    new_timestamped = set(out_dir.glob("anyconnect-sessions-*")) - pre_existing if out_dir.exists() else set()
+    output_files: list[Path] = list(new_timestamped)
+    if args.excel:
+        excel_path = out_dir / config.output.excel_filename
+        if excel_path.exists() and excel_path not in output_files:
+            output_files.append(excel_path)
+
+    # Build summary dict for the mailer
+    results_summary = {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "total_devices": len(results),
+        "successful_devices": sum(1 for r in results if r.success),
+        "total_sessions": sum(len(r.sessions) for r in results),
+        "devices": [
+            {
+                "host": r.host,
+                "sessions": len(r.sessions),
+                "status": "OK" if r.success else f"FAILED: {r.error}",
+            }
+            for r in results
+        ],
+    }
+
+    # Send email if enabled
+    if send_email:
+        send_report(output_files, results_summary, config)
+
+    # Final summary log
+    logger.info(
+        "Run complete — total_devices=%d, successful=%d, total_sessions=%d",
+        results_summary["total_devices"],
+        results_summary["successful_devices"],
+        results_summary["total_sessions"],
     )
-    _ = username, password  # suppress unused-variable warnings until used downstream
