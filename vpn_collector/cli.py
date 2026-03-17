@@ -4,6 +4,7 @@ import argparse
 import getpass
 import logging
 import sys
+import yaml
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
@@ -18,6 +19,13 @@ _LOG_BACKUP_COUNT = 3
 # ---------------------------------------------------------------------------
 # Argument parser
 # ---------------------------------------------------------------------------
+
+def _positive_int(value: str) -> int:
+    n = int(value)
+    if n < 1:
+        raise argparse.ArgumentTypeError(f"--workers must be >= 1, got {n}")
+    return n
+
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
@@ -68,7 +76,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--workers",
         metavar="N",
-        type=int,
+        type=_positive_int,
         help="override max_workers",
     )
     parser.add_argument(
@@ -99,6 +107,7 @@ def _setup_logging(output_dir: str, verbose: bool) -> None:
     # Avoid duplicate handlers if main() is called more than once (e.g. in tests)
     if logger.handlers:
         logger.handlers.clear()
+    logger.propagate = False
 
     formatter = logging.Formatter(_LOG_FORMAT)
 
@@ -160,13 +169,13 @@ def main() -> None:
 
     # Set up logging before anything else
     _setup_logging(early_output_dir, args.verbose)
-    logger = logging.getLogger("vpn_collector")
+    logger = logging.getLogger("vpn_collector")  # noqa: F841 — used below
 
     # Load configuration
     try:
         config = load_config(args.config)
-    except (FileNotFoundError, ValueError) as exc:
-        print(str(exc), file=sys.stderr)
+    except (FileNotFoundError, ValueError, yaml.YAMLError) as exc:
+        print(f"Error loading config: {exc}", file=sys.stderr)
         sys.exit(1)
 
     # Apply CLI overrides onto config
@@ -177,7 +186,6 @@ def main() -> None:
     # is already correct; if it came from config we need to re-init)
     if args.output_dir is None and config.output.directory != ".":
         _setup_logging(config.output.directory, args.verbose)
-        logger = logging.getLogger("vpn_collector")
 
     # Default output format: if none specified, default to Excel
     if not (args.excel or args.csv or args.json):
