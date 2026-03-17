@@ -327,7 +327,7 @@ class TestHtmlBody:
         html = _build_html_body(summary)
         # Verify that HTML entities are used instead of raw HTML
         assert "&lt;evil&gt;&amp;" in html
-        assert "<evil>&" not in html or "&lt;evil&gt;&amp;" in html
+        assert "<evil>&" not in html
 
 
 # ---------------------------------------------------------------------------
