@@ -51,8 +51,8 @@ def collect_device(
         Number of retry attempts after the initial failure (so total
         attempts = retries + 1).
     backoff_base:
-        Base for the exponential back-off.  Wait ``backoff_base ** attempt``
-        seconds *before* each retry (attempt 0 = first retry).
+        Base for the exponential back-off.  Wait ``backoff_base ** (attempt - 1)``
+        seconds *before* each retry (attempt 1 = first retry, wait = 1 s).
 
     Returns
     -------
