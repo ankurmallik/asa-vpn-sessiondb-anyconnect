@@ -10,7 +10,7 @@ from unittest.mock import MagicMock, patch, call
 import pytest
 
 from vpn_collector.config import AppConfig, EmailConfig
-from vpn_collector.mailer import send_report, _build_html_body, _build_text_body
+from vpn_collector.mailer import send_report, _build_html_body, _build_text_body, _EMAIL_SUBJECT
 
 
 # ---------------------------------------------------------------------------
@@ -65,14 +65,14 @@ def _make_files(tmp_path: Path, count: int = 2) -> list[Path]:
 # ---------------------------------------------------------------------------
 
 class TestEmptyFilesGuard:
-    def test_no_smtp_connection_when_files_empty(self, tmp_path: Path) -> None:
+    def test_no_smtp_connection_when_files_empty(self) -> None:
         config = _make_config()
-        with patch("smtplib.SMTP") as mock_smtp_cls:
+        with patch("vpn_collector.mailer.smtplib.SMTP") as mock_smtp_cls:
             send_report([], _SUMMARY, config)
             mock_smtp_cls.assert_not_called()
 
     def test_warning_logged_when_files_empty(
-        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+        self, caplog: pytest.LogCaptureFixture
     ) -> None:
         config = _make_config()
         pkg_logger = logging.getLogger("vpn_collector")
@@ -94,7 +94,7 @@ class TestSmtpTls:
     def test_starttls_called_when_tls_true(self, tmp_path: Path) -> None:
         config = _make_config(tls=True)
         files = _make_files(tmp_path)
-        with patch("smtplib.SMTP") as mock_smtp_cls:
+        with patch("vpn_collector.mailer.smtplib.SMTP") as mock_smtp_cls:
             mock_server = MagicMock()
             mock_smtp_cls.return_value.__enter__ = MagicMock(return_value=mock_server)
             mock_smtp_cls.return_value.__exit__ = MagicMock(return_value=False)
@@ -104,7 +104,7 @@ class TestSmtpTls:
     def test_starttls_not_called_when_tls_false(self, tmp_path: Path) -> None:
         config = _make_config(tls=False)
         files = _make_files(tmp_path)
-        with patch("smtplib.SMTP") as mock_smtp_cls:
+        with patch("vpn_collector.mailer.smtplib.SMTP") as mock_smtp_cls:
             mock_server = MagicMock()
             mock_smtp_cls.return_value.__enter__ = MagicMock(return_value=mock_server)
             mock_smtp_cls.return_value.__exit__ = MagicMock(return_value=False)
@@ -120,7 +120,7 @@ class TestSmtpTls:
         original_propagate = pkg_logger.propagate
         try:
             pkg_logger.propagate = True
-            with patch("smtplib.SMTP") as mock_smtp_cls:
+            with patch("vpn_collector.mailer.smtplib.SMTP") as mock_smtp_cls:
                 mock_server = MagicMock()
                 mock_smtp_cls.return_value.__enter__ = MagicMock(return_value=mock_server)
                 mock_smtp_cls.return_value.__exit__ = MagicMock(return_value=False)
@@ -140,7 +140,7 @@ class TestSmtpLogin:
     def test_login_called_when_username_non_empty(self, tmp_path: Path) -> None:
         config = _make_config(smtp_username="user@example.com", smtp_password="secret")
         files = _make_files(tmp_path)
-        with patch("smtplib.SMTP") as mock_smtp_cls:
+        with patch("vpn_collector.mailer.smtplib.SMTP") as mock_smtp_cls:
             mock_server = MagicMock()
             mock_smtp_cls.return_value.__enter__ = MagicMock(return_value=mock_server)
             mock_smtp_cls.return_value.__exit__ = MagicMock(return_value=False)
@@ -150,7 +150,7 @@ class TestSmtpLogin:
     def test_login_not_called_when_username_empty(self, tmp_path: Path) -> None:
         config = _make_config(smtp_username="")
         files = _make_files(tmp_path)
-        with patch("smtplib.SMTP") as mock_smtp_cls:
+        with patch("vpn_collector.mailer.smtplib.SMTP") as mock_smtp_cls:
             mock_server = MagicMock()
             mock_smtp_cls.return_value.__enter__ = MagicMock(return_value=mock_server)
             mock_smtp_cls.return_value.__exit__ = MagicMock(return_value=False)
@@ -172,7 +172,7 @@ class TestSmtpSuccessLogging:
         original_propagate = pkg_logger.propagate
         try:
             pkg_logger.propagate = True
-            with patch("smtplib.SMTP") as mock_smtp_cls:
+            with patch("vpn_collector.mailer.smtplib.SMTP") as mock_smtp_cls:
                 mock_server = MagicMock()
                 mock_smtp_cls.return_value.__enter__ = MagicMock(return_value=mock_server)
                 mock_smtp_cls.return_value.__exit__ = MagicMock(return_value=False)
@@ -185,7 +185,7 @@ class TestSmtpSuccessLogging:
     def test_smtp_called_with_correct_server_and_port(self, tmp_path: Path) -> None:
         config = _make_config()
         files = _make_files(tmp_path)
-        with patch("smtplib.SMTP") as mock_smtp_cls:
+        with patch("vpn_collector.mailer.smtplib.SMTP") as mock_smtp_cls:
             mock_server = MagicMock()
             mock_smtp_cls.return_value.__enter__ = MagicMock(return_value=mock_server)
             mock_smtp_cls.return_value.__exit__ = MagicMock(return_value=False)
@@ -207,7 +207,7 @@ class TestExceptionHandling:
         original_propagate = pkg_logger.propagate
         try:
             pkg_logger.propagate = True
-            with patch("smtplib.SMTP") as mock_smtp_cls:
+            with patch("vpn_collector.mailer.smtplib.SMTP") as mock_smtp_cls:
                 mock_smtp_cls.return_value.__enter__ = MagicMock(
                     side_effect=smtplib.SMTPException("connection failed")
                 )
@@ -223,7 +223,7 @@ class TestExceptionHandling:
     def test_smtp_exception_not_raised(self, tmp_path: Path) -> None:
         config = _make_config()
         files = _make_files(tmp_path)
-        with patch("smtplib.SMTP") as mock_smtp_cls:
+        with patch("vpn_collector.mailer.smtplib.SMTP") as mock_smtp_cls:
             mock_smtp_cls.return_value.__enter__ = MagicMock(
                 side_effect=smtplib.SMTPException("boom")
             )
@@ -240,7 +240,7 @@ class TestExceptionHandling:
         original_propagate = pkg_logger.propagate
         try:
             pkg_logger.propagate = True
-            with patch("smtplib.SMTP") as mock_smtp_cls:
+            with patch("vpn_collector.mailer.smtplib.SMTP") as mock_smtp_cls:
                 mock_smtp_cls.return_value.__enter__ = MagicMock(
                     side_effect=OSError("Connection refused")
                 )
@@ -256,7 +256,7 @@ class TestExceptionHandling:
     def test_oserror_not_raised(self, tmp_path: Path) -> None:
         config = _make_config()
         files = _make_files(tmp_path)
-        with patch("smtplib.SMTP") as mock_smtp_cls:
+        with patch("vpn_collector.mailer.smtplib.SMTP") as mock_smtp_cls:
             mock_smtp_cls.return_value.__enter__ = MagicMock(
                 side_effect=OSError("DNS failure")
             )
@@ -313,6 +313,22 @@ class TestHtmlBody:
         assert "Sessions" in html
         assert "Status" in html
 
+    def test_html_escapes_device_hostname(self) -> None:
+        """HTML escaping: device hostnames with malicious HTML are escaped."""
+        summary = {
+            "timestamp": "2024-06-01T12:00:00+00:00",
+            "total_devices": 1,
+            "successful_devices": 1,
+            "total_sessions": 0,
+            "devices": [
+                {"host": "<evil>&", "sessions": 0, "status": "ok"},
+            ],
+        }
+        html = _build_html_body(summary)
+        # Verify that HTML entities are used instead of raw HTML
+        assert "&lt;evil&gt;&amp;" in html
+        assert "<evil>&" not in html or "&lt;evil&gt;&amp;" in html
+
 
 # ---------------------------------------------------------------------------
 # 8.3 — Plain-text body content
@@ -361,7 +377,7 @@ class TestAttachments:
         files = _make_files(tmp_path, count=3)
         captured_messages: list[str] = []
 
-        with patch("smtplib.SMTP") as mock_smtp_cls:
+        with patch("vpn_collector.mailer.smtplib.SMTP") as mock_smtp_cls:
             mock_server = MagicMock()
             mock_smtp_cls.return_value.__enter__ = MagicMock(return_value=mock_server)
             mock_smtp_cls.return_value.__exit__ = MagicMock(return_value=False)
@@ -387,7 +403,7 @@ class TestAttachments:
         files = _make_files(tmp_path, count=1)
         captured_messages: list[str] = []
 
-        with patch("smtplib.SMTP") as mock_smtp_cls:
+        with patch("vpn_collector.mailer.smtplib.SMTP") as mock_smtp_cls:
             mock_server = MagicMock()
             mock_smtp_cls.return_value.__enter__ = MagicMock(return_value=mock_server)
             mock_smtp_cls.return_value.__exit__ = MagicMock(return_value=False)
@@ -411,7 +427,7 @@ class TestAttachments:
         files = _make_files(tmp_path, count=1)
         captured_messages: list[str] = []
 
-        with patch("smtplib.SMTP") as mock_smtp_cls:
+        with patch("vpn_collector.mailer.smtplib.SMTP") as mock_smtp_cls:
             mock_server = MagicMock()
             mock_smtp_cls.return_value.__enter__ = MagicMock(return_value=mock_server)
             mock_smtp_cls.return_value.__exit__ = MagicMock(return_value=False)
@@ -441,7 +457,7 @@ class TestMessageHeaders:
         files = _make_files(tmp_path)
         captured_messages: list[str] = []
 
-        with patch("smtplib.SMTP") as mock_smtp_cls:
+        with patch("vpn_collector.mailer.smtplib.SMTP") as mock_smtp_cls:
             mock_server = MagicMock()
             mock_smtp_cls.return_value.__enter__ = MagicMock(return_value=mock_server)
             mock_smtp_cls.return_value.__exit__ = MagicMock(return_value=False)
@@ -461,7 +477,7 @@ class TestMessageHeaders:
         files = _make_files(tmp_path)
         captured_messages: list[str] = []
 
-        with patch("smtplib.SMTP") as mock_smtp_cls:
+        with patch("vpn_collector.mailer.smtplib.SMTP") as mock_smtp_cls:
             mock_server = MagicMock()
             mock_smtp_cls.return_value.__enter__ = MagicMock(return_value=mock_server)
             mock_smtp_cls.return_value.__exit__ = MagicMock(return_value=False)
@@ -483,7 +499,7 @@ class TestMessageHeaders:
         files = _make_files(tmp_path)
         captured_messages: list[str] = []
 
-        with patch("smtplib.SMTP") as mock_smtp_cls:
+        with patch("vpn_collector.mailer.smtplib.SMTP") as mock_smtp_cls:
             mock_server = MagicMock()
             mock_smtp_cls.return_value.__enter__ = MagicMock(return_value=mock_server)
             mock_smtp_cls.return_value.__exit__ = MagicMock(return_value=False)
@@ -496,5 +512,4 @@ class TestMessageHeaders:
 
         import email
         msg = email.message_from_string(captured_messages[0])
-        assert msg["Subject"] is not None
-        assert len(msg["Subject"]) > 0
+        assert msg["Subject"] == _EMAIL_SUBJECT

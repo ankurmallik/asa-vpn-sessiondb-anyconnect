@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import html
 import logging
 import smtplib
 from email import encoders
@@ -13,6 +14,7 @@ from pathlib import Path
 from vpn_collector.config import AppConfig
 
 _logger = logging.getLogger("vpn_collector.mailer")
+_EMAIL_SUBJECT = "AnyConnect VPN Session Report"
 
 
 # ---------------------------------------------------------------------------
@@ -21,17 +23,17 @@ _logger = logging.getLogger("vpn_collector.mailer")
 
 def _build_html_body(results_summary: dict) -> str:
     """Return a well-formatted HTML email body from *results_summary*."""
-    timestamp = results_summary.get("timestamp", "N/A")
-    total_devices = results_summary.get("total_devices", 0)
-    successful_devices = results_summary.get("successful_devices", 0)
-    total_sessions = results_summary.get("total_sessions", 0)
+    timestamp = html.escape(str(results_summary.get("timestamp", "N/A")))
+    total_devices = html.escape(str(results_summary.get("total_devices", 0)))
+    successful_devices = html.escape(str(results_summary.get("successful_devices", 0)))
+    total_sessions = html.escape(str(results_summary.get("total_sessions", 0)))
     devices = results_summary.get("devices", [])
 
     rows_html = ""
     for device in devices:
-        host = device.get("host", "")
-        sessions = device.get("sessions", 0)
-        status = device.get("status", "")
+        host = html.escape(str(device.get("host", "")))
+        sessions = html.escape(str(device.get("sessions", 0)))
+        status = html.escape(str(device.get("status", "")))
         rows_html += (
             f"    <tr>\n"
             f"      <td style='padding:4px 8px;border:1px solid #ccc;'>{host}</td>\n"
@@ -94,7 +96,7 @@ def _build_text_body(results_summary: dict) -> str:
         f"Run Timestamp:           {timestamp}",
         f"Total Devices Queried:   {total_devices}",
         f"Successful Devices:      {successful_devices}",
-        f"Total Sessions Collected:{total_sessions}",
+        f"Total Sessions Collected: {total_sessions}",
         "",
         f"{'Host':<30} {'Sessions':>9}  Status",
         "-" * 55,
@@ -140,7 +142,7 @@ def send_report(
     outer = MIMEMultipart("mixed")
     outer["From"] = config.email.from_address
     outer["To"] = ", ".join(config.email.recipients)
-    outer["Subject"] = "AnyConnect VPN Session Report"
+    outer["Subject"] = _EMAIL_SUBJECT
 
     # Alternative inner part (text + HTML)
     inner = MIMEMultipart("alternative")
