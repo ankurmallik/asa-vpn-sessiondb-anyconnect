@@ -2,18 +2,19 @@
 
 ## Overview
 
-A Python package that collects AnyConnect VPN session statistics from one or more Cisco ASA devices over SSH and writes the results to Excel, CSV, or JSON. It can also send the output file by email when collection is complete.
+A Python package that collects AnyConnect VPN session statistics from one or more Cisco ASA devices over SSH and writes the results to Excel, CSV, or JSON. Runs against large fleets concurrently, retries failed devices automatically, and can email the output when collection is done.
 
 ---
 
 ## Features
 
-- **Concurrent SSH collection** — polls multiple ASA devices in parallel using a configurable thread-pool worker count
-- **Multi-format output** — write results as Excel (`.xlsx` with Summary + Raw sheets), CSV, or JSON; multiple formats can be selected in a single run
-- **TLS email delivery** — optional STARTTLS-secured SMTP notifications with attachment support
+- **Concurrent SSH collection** — polls multiple ASA devices in parallel using a configurable thread-pool (default 20 workers, tested at 50+)
+- **Multi-format output** — Excel (`.xlsx` with Summary + Raw sheets), CSV, and JSON; combine any or all in one run
+- **TLS email delivery** — optional STARTTLS-secured SMTP with HTML summary body and file attachments
 - **CLI interface** — full command-line control over devices, output format, directory, worker count, and verbosity
-- **YAML configuration** — single `config.yaml` file covers all settings; no source-code editing required
-- **Rotating log file** — `vpn_collector.log` is written with automatic rotation to prevent unbounded growth
+- **YAML configuration** — single `config.yaml` covers all settings; no source-code editing required
+- **Retry with backoff** — per-device exponential back-off on SSH failure
+- **Rotating log file** — `vpn_collector.log` written with automatic rotation
 
 ---
 
@@ -22,7 +23,7 @@ A Python package that collects AnyConnect VPN session statistics from one or mor
 - Python 3.10 or later
 - Install dependencies:
 
-```
+```bash
 pip install -r requirements.txt
 ```
 
@@ -30,25 +31,18 @@ pip install -r requirements.txt
 
 ## Quick Start
 
-1. Copy the example configuration file:
+```bash
+# 1. Copy the example config
+cp config.example.yaml config.yaml
 
-   ```
-   cp config.example.yaml config.yaml
-   ```
+# 2. Add your ASA device IPs/hostnames
+vi config.yaml
 
-2. Edit `config.yaml` — add your device IPs/hostnames and (optionally) configure email:
+# 3. Run — defaults to Excel output
+python -m vpn_collector
+```
 
-   ```yaml
-   devices:
-     - 10.0.0.1
-     - asa2.corp.example.com
-   ```
-
-3. Run the collector (defaults to Excel output):
-
-   ```
-   python -m vpn_collector
-   ```
+You will be prompted for SSH credentials at runtime. No passwords are stored on disk.
 
 ---
 
@@ -62,70 +56,103 @@ usage: vpn_collector [-h] [--devices HOST [HOST ...]] [--excel] [--csv]
 
 | Flag | Description |
 |------|-------------|
-| `--devices HOST [HOST ...]` | Override the device list from `config.yaml` |
-| `--excel` | Write Excel output (`.xlsx` with Summary and Raw sheets) |
+| `--devices HOST [HOST ...]` | Override device list from `config.yaml` |
+| `--excel` | Write Excel output (Summary + Raw sheets) |
 | `--csv` | Write CSV output |
 | `--json` | Write JSON output |
-| `--email` | Send email notification after collection (overrides `config.yaml` `email.enabled`) |
-| `--output-dir DIR` | Override the output directory from `config.yaml` |
-| `--workers N` | Override `collection.max_workers` from `config.yaml` |
+| `--email` | Send email after collection (overrides `config.yaml` `email.enabled`) |
+| `--output-dir DIR` | Override output directory |
+| `--workers N` | Override `collection.max_workers` |
 | `--verbose`, `-v` | Enable debug-level console logging |
-| `--config FILE` | Path to config file (default: `config.yaml` in the current working directory) |
+| `--config FILE` | Path to config file (default: `config.yaml` in CWD) |
 
-Multiple output-format flags may be combined; if none are given, `--excel` is the default.
+If no output-format flag is given, `--excel` is used by default.
+
+### Examples
+
+**Collect from all configured devices, write Excel (default):**
+```bash
+python -m vpn_collector
+```
+
+**Collect from all configured devices, write all three formats:**
+```bash
+python -m vpn_collector --excel --csv --json
+```
+
+**Target two specific firewalls, write JSON only:**
+```bash
+python -m vpn_collector --devices 10.0.0.1 10.0.0.2 --json
+```
+
+**Write output to a specific directory:**
+```bash
+python -m vpn_collector --excel --output-dir /var/reports/vpn
+```
+
+**Run with higher concurrency against a large fleet:**
+```bash
+python -m vpn_collector --workers 40
+```
+
+**Collect, write CSV, and email the result:**
+```bash
+python -m vpn_collector --csv --email
+```
+
+**Debug a failing device — verbose console output:**
+```bash
+python -m vpn_collector --devices 10.0.0.5 --verbose
+```
+
+**Use a non-default config file:**
+```bash
+python -m vpn_collector --config /etc/vpn-collector/prod.yaml
+```
 
 ---
 
 ## Configuration Reference
 
-All settings live in `config.yaml`. The full set of options with their defaults is documented in `config.example.yaml`.
+Copy `config.example.yaml` to `config.yaml` and edit. The full annotated example is in `config.example.yaml`.
 
 ### `devices`
-
-A list of ASA device hostnames or IP addresses to poll.
 
 ```yaml
 devices:
   - 10.0.0.1
-  - asa.corp.example.com
+  - 10.0.0.2
+  - asa-dmz.corp.example.com
 ```
 
 ### `collection`
 
-Controls SSH polling behaviour.
-
 | Key | Default | Description |
 |-----|---------|-------------|
-| `max_workers` | `20` | Maximum concurrent SSH connections |
+| `max_workers` | `20` | Maximum concurrent SSH connections (recommended ceiling: 50) |
 | `retries` | `3` | Retry attempts per device on failure |
-| `retry_backoff_base` | `2.0` | Exponential back-off base in seconds (`base ^ attempt`) |
+| `retry_backoff_base` | `2.0` | Exponential back-off base in seconds |
 | `timeout` | `30` | SSH connection timeout in seconds |
 
 ### `output`
 
-Controls where output files are written.
-
 | Key | Default | Description |
 |-----|---------|-------------|
-| `directory` | `"."` | Directory for output files |
-| `excel_filename` | `"AnyConnect-Sessions.xlsx"` | Excel output filename |
+| `directory` | `"."` | Directory for all output files |
+| `excel_filename` | `"AnyConnect-Sessions.xlsx"` | Excel workbook filename |
 
 ### `email`
 
-Controls optional email notifications.
-
 | Key | Default | Description |
 |-----|---------|-------------|
-| `enabled` | `false` | Enable email sending |
+| `enabled` | `false` | Send email after each run |
 | `smtp_server` | — | SMTP server hostname or IP |
 | `smtp_port` | `587` | SMTP port |
 | `tls` | `true` | Use STARTTLS |
-| `smtp_username` | `""` | SMTP authentication username (leave blank to skip auth) |
-| `smtp_password` | `""` | SMTP authentication password (leave blank to skip auth) |
+| `smtp_username` | `""` | Auth username (leave blank to skip auth) |
+| `smtp_password` | `""` | Auth password — **never commit real values** |
 | `from_address` | — | Sender address |
 | `recipients` | — | List of recipient addresses |
-
-**Never commit real SMTP credentials to source control.** Use environment-variable substitution or a secrets manager and reference them in `config.yaml`.
 
 ---
 
@@ -133,41 +160,143 @@ Controls optional email notifications.
 
 ### Excel (default)
 
-A single `.xlsx` workbook with two sheets:
+A single `.xlsx` workbook with two sheets per run:
 
-- **Summary** — one row per device showing total session count and collection status
-- **Raw** — one row per AnyConnect session with all parsed fields (username, assigned IP, public IP, protocol, bytes in/out, duration, etc.)
+**Summary sheet** — one row per device:
+
+| Run Timestamp | Total Devices | Successful | Total Sessions |
+|---------------|--------------|------------|----------------|
+| 2026-03-17T06:00:00+00:00 | 12 | 11 | 347 |
+
+| Host | Sessions | Status |
+|------|----------|--------|
+| 10.0.0.1 | 42 | OK |
+| 10.0.0.2 | 31 | OK |
+| 10.0.0.3 | 0 | FAILED: Authentication failed |
+
+**Raw sheet** (`Raw_20260317_060000`) — one row per AnyConnect session:
+
+| username | assigned_ip | public_ip | protocol | bytes_tx | bytes_rx | duration | group_policy | tunnel_group |
+|----------|-------------|-----------|----------|----------|----------|----------|--------------|--------------|
+| jsmith | 10.10.1.100 | 203.0.113.50 | AnyConnect-Parent SSL-Tunnel DTLS-Tunnel | 12345678 | 87654321 | 2h:15m:30s | GroupPolicy_RA | RA-VPN |
+| bjones | 10.10.1.101 | 198.51.100.22 | AnyConnect-Parent SSL-Tunnel DTLS-Tunnel | 5000000 | 3000000 | 1h:30m:00s | GroupPolicy_RA | RA-VPN |
+
+Subsequent runs append a new `Raw_YYYYMMDD_HHMMSS` sheet — the workbook accumulates history across runs.
+
+---
 
 ### CSV
 
-A flat `.csv` file containing the same per-session rows as the Raw sheet.
+Flat file, one row per session. Filename: `anyconnect-sessions-YYYYMMDD_HHMMSS.csv`
+
+```
+username,assigned_ip,public_ip,protocol,bytes_tx,bytes_rx,duration,group_policy,tunnel_group,login_time,...
+jsmith,10.10.1.100,203.0.113.50,AnyConnect-Parent SSL-Tunnel DTLS-Tunnel,12345678,87654321,2h:15m:30s,GroupPolicy_RA,RA-VPN,09:30:15 UTC Mon Mar 17 2026,...
+bjones,10.10.1.101,198.51.100.22,AnyConnect-Parent SSL-Tunnel DTLS-Tunnel,5000000,3000000,1h:30m:00s,GroupPolicy_RA,RA-VPN,10:15:00 UTC Mon Mar 17 2026,...
+```
+
+---
 
 ### JSON
 
-A `.json` file containing an array of session objects, one element per session.
+Array of device result objects. Filename: `anyconnect-sessions-YYYYMMDD_HHMMSS.json`
+
+```json
+[
+  {
+    "host": "10.0.0.1",
+    "success": true,
+    "collected_at": "2026-03-17T06:00:01.234567+00:00",
+    "session_count": 2,
+    "sessions": [
+      {
+        "username": "jsmith",
+        "assigned_ip": "10.10.1.100",
+        "public_ip": "203.0.113.50",
+        "protocol": "AnyConnect-Parent SSL-Tunnel DTLS-Tunnel",
+        "bytes_tx": "12345678",
+        "bytes_rx": "87654321",
+        "duration": "2h:15m:30s",
+        "group_policy": "GroupPolicy_RA",
+        "tunnel_group": "RA-VPN"
+      },
+      {
+        "username": "bjones",
+        "assigned_ip": "10.10.1.101",
+        "public_ip": "198.51.100.22",
+        "protocol": "AnyConnect-Parent SSL-Tunnel DTLS-Tunnel",
+        "bytes_tx": "5000000",
+        "bytes_rx": "3000000",
+        "duration": "1h:30m:00s",
+        "group_policy": "GroupPolicy_RA",
+        "tunnel_group": "RA-VPN"
+      }
+    ]
+  },
+  {
+    "host": "10.0.0.3",
+    "success": false,
+    "collected_at": "2026-03-17T06:00:04.891234+00:00",
+    "session_count": 0,
+    "sessions": [],
+    "error": "Authentication failed."
+  }
+]
+```
+
+---
+
+### Log output
+
+Console output during a run (normal verbosity):
+
+```
+2026-03-17 06:00:00,000 [INFO] vpn_collector: No output format specified, defaulting to Excel.
+Username: admin
+Password:
+2026-03-17 06:00:04,123 [INFO] vpn_collector: Run complete — total_devices=12, successful=11, total_sessions=347
+```
+
+With `--verbose`:
+
+```
+2026-03-17 06:00:00,001 [DEBUG] vpn_collector: Connecting to 10.0.0.1 (attempt 1/4)
+2026-03-17 06:00:00,002 [DEBUG] vpn_collector: Connecting to 10.0.0.2 (attempt 1/4)
+...
+2026-03-17 06:00:02,441 [WARNING] vpn_collector: [10.0.0.3] All retries exhausted: Authentication failed.
+2026-03-17 06:00:04,123 [INFO] vpn_collector: Run complete — total_devices=12, successful=11, total_sessions=347
+```
 
 ---
 
 ## Migration from v1
 
-The original single-script layout has been replaced by the `vpn_collector` package:
-
 | v1 | v2 |
 |----|----|
-| `asa_devices.txt` (device list) | `devices:` list in `config.yaml` |
-| `ciphertext.bin` (encrypted credentials) | No longer used — **delete it** |
+| `asa_devices.txt` | `devices:` list in `config.yaml` |
+| `ciphertext.bin` (encrypted credentials) | Removed — **delete it** |
 | `fetch_creds.py` | Removed |
 | `command.py` | `vpn_collector/collector.py` |
 | `data_handler.py` | `vpn_collector/reporter.py` |
 | `send_mail.py` | `vpn_collector/mailer.py` |
 | `main.py` | `python -m vpn_collector` |
 
-Steps to migrate:
+Migration steps:
 
-1. Delete `ciphertext.bin` if it exists.
-2. Copy `config.example.yaml` to `config.yaml` and fill in your device list and email settings.
-3. Install updated dependencies: `pip install -r requirements.txt`
-4. Run `python -m vpn_collector`.
+```bash
+# Remove old credential file
+rm -f ciphertext.bin
+
+# Set up config
+cp config.example.yaml config.yaml
+# edit config.yaml — add devices, configure email if needed
+
+# Update dependencies
+pip install -r requirements.txt
+
+# Run
+python -m vpn_collector
+```
 
 ---
 
