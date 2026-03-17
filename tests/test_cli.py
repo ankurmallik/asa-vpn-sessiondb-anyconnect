@@ -111,12 +111,14 @@ class TestApplyOverrides:
         _apply_overrides(cfg, args)
         assert cfg.collection.max_workers == 7
 
-    def test_email_flag_enables_email(self):
+    def test_email_flag_does_not_mutate_config(self):
         cfg = self._config()
         assert cfg.email.enabled is False
         args = _parse(["--email"])
         _apply_overrides(cfg, args)
-        assert cfg.email.enabled is True
+        # --email no longer mutates config.email.enabled; send_email is
+        # computed in main() via: send_email = config.email.enabled or args.email
+        assert cfg.email.enabled is False
 
     def test_no_flags_leaves_config_unchanged(self):
         cfg = self._config()

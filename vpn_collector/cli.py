@@ -154,8 +154,6 @@ def _apply_overrides(config: AppConfig, args: argparse.Namespace) -> None:
         config.output.directory = args.output_dir
     if args.workers is not None:
         config.collection.max_workers = args.workers
-    if args.email:
-        config.email.enabled = True
 
 
 # ---------------------------------------------------------------------------
@@ -196,15 +194,31 @@ def main() -> None:
         args.excel = True
         logger.info("No output format specified, defaulting to Excel.")
 
+    # Determine whether to send email (CLI flag overrides config)
+    send_email = config.email.enabled or args.email
+
+    # Validate email settings now that we know whether email will be sent
+    if send_email:
+        email_errors = []
+        if not config.email.smtp_server:
+            email_errors.append("'email.smtp_server' is required when email is enabled.")
+        if not config.email.from_address:
+            email_errors.append("'email.from_address' is required when email is enabled.")
+        if not config.email.recipients:
+            email_errors.append("'email.recipients' must be non-empty when email is enabled.")
+        if email_errors:
+            print("Config error:\n" + "\n".join(f"  - {e}" for e in email_errors), file=sys.stderr)
+            sys.exit(1)
+
     # Prompt for credentials
     username = input("Username: ")
     password = getpass.getpass("Password: ")
 
-    # Determine whether to send email (CLI flag overrides config)
-    send_email = config.email.enabled or args.email
-
     # Collect VPN sessions from all devices
     results = collect_all(config, username, password)
+
+    # Determine whether any sessions were collected this run
+    has_data = sum(len(r.sessions) for r in results) > 0
 
     # Snapshot existing output files before writing (to detect new ones for email)
     out_dir = Path(config.output.directory)
@@ -221,7 +235,7 @@ def main() -> None:
     # Gather output files to attach: timestamped files added this run + excel if written
     new_timestamped = set(out_dir.glob("anyconnect-sessions-*")) - pre_existing if out_dir.exists() else set()
     output_files: list[Path] = list(new_timestamped)
-    if args.excel:
+    if args.excel and has_data:
         excel_path = out_dir / config.output.excel_filename
         if excel_path.exists() and excel_path not in output_files:
             output_files.append(excel_path)
